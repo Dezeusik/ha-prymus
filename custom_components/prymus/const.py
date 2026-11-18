@@ -1,0 +1,9 @@
+DOMAIN = "prymus"
+LOGIN_URL = "https://login.prymus.net/login"
+CONF_EMAIL = "email"
+CONF_PASSWORD = "password"
+CONF_SCAN_MINUTES = "scan_minutes"
+DEFAULT_SCAN_MINUTES = 60
+EVENT_NEW_GRADE = "prymus_nowa_ocena"
+EVENT_NEW_REMARK = "prymus_nowa_uwaga"
+PAGES = ("oceny", "nieobecn", "inform_ucznia", "zdobyte_punkty", "rozkl_ucznia", "ogloszenia")
