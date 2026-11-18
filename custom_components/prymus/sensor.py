@@ -1,15 +1,20 @@
 from __future__ import annotations
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from datetime import timedelta
+from homeassistant.core import callback
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.util import dt as dt_util
 from .const import DOMAIN
+from .helpers import events_between, lesson_status, local
 from .parser import WEEKDAYS
 
 
 async def async_setup_entry(hass, entry, async_add):
     c = hass.data[DOMAIN][entry.entry_id]
     async_add([cls(c, entry) for cls in (GradesCount, LatestGrade, MissedHours, Unexcused, Late,
-                                         Remarks, Points, TodayPlan, TomorrowPlan, Announcements)])
+                                         Remarks, Points, TodayPlan, TomorrowPlan, Announcements,
+                                         Now, NextLesson, EventsTomorrow, NextEvent, Unread)])
 
 
 class Base(CoordinatorEntity, SensorEntity):
@@ -147,3 +152,95 @@ class Announcements(Base):
     def extra_state_attributes(self):
         a = self.d.get("announcements", [])
         return {"najnowsze": a[0] if a else None, "lista": a[:5]}
+
+
+class _Clock(Base):
+    """Czujnik zależny od godziny – przelicza się co minutę, bez odpytywania serwera."""
+
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
+        self.async_on_remove(async_track_time_interval(self.hass, self._tick, timedelta(minutes=1)))
+
+    @callback
+    def _tick(self, _now) -> None:
+        self.async_write_ha_state()
+
+
+def _lesson_attrs(l):
+    if not l:
+        return {}
+    return {"przedmiot": l["przedmiot"], "od": local(l["start"]).strftime("%H:%M"), "do": local(l["koniec"]).strftime("%H:%M"),
+            "dzien": WEEKDAYS[local(l["start"]).weekday()], "sala": l.get("sala"), "nauczyciel": l.get("nauczyciel")}
+
+
+class Now(_Clock):
+    key, _attr_name, _attr_icon = "now", "Teraz", "mdi:clock-outline"
+
+    @property
+    def native_value(self):
+        st = lesson_status(self.d)
+        return st["teraz"]["przedmiot"][:255] if st["teraz"] else st["stan"]
+
+    @property
+    def extra_state_attributes(self):
+        st = lesson_status(self.d)
+        return {"stan": st["stan"], "lekcja": _lesson_attrs(st["teraz"]), "nastepna": _lesson_attrs(st["nastepna"])}
+
+
+class NextLesson(_Clock):
+    key, _attr_name, _attr_icon = "next_lesson", "Następna lekcja", "mdi:arrow-right-circle"
+
+    @property
+    def native_value(self):
+        n = lesson_status(self.d)["nastepna"]
+        return n["przedmiot"][:255] if n else None
+
+    @property
+    def extra_state_attributes(self):
+        return _lesson_attrs(lesson_status(self.d)["nastepna"])
+
+
+class EventsTomorrow(_Clock):
+    key, _attr_name, _attr_icon = "events_tomorrow", "Wydarzenia jutro", "mdi:bag-checked"
+
+    def _list(self):
+        start = dt_util.start_of_local_day(dt_util.now() + timedelta(days=1))
+        return events_between(self.d, start, start + timedelta(days=1))
+
+    @property
+    def native_value(self):
+        return len(self._list())
+
+    @property
+    def extra_state_attributes(self):
+        return {"wydarzenia": [{"tytul": e["tytul"], "opis": e["opis"], "godzina": local(e["start"]).strftime("%H:%M")}
+                               for e in self._list()]}
+
+
+class NextEvent(_Clock):
+    key, _attr_name, _attr_icon = "next_event", "Najbliższe wydarzenie", "mdi:calendar-arrow-right"
+
+    def _next(self):
+        now = dt_util.now()
+        evs = [e for e in self.d.get("events", []) if local(e["koniec"]) >= now]
+        return evs[0] if evs else None
+
+    @property
+    def native_value(self):
+        e = self._next()
+        return e["tytul"][:255] if e else None
+
+    @property
+    def extra_state_attributes(self):
+        e = self._next()
+        return {"opis": e["opis"], "start": e["start"], "koniec": e["koniec"],
+                "za_dni": (local(e["start"]).date() - dt_util.now().date()).days} if e else {}
+
+
+class Unread(Base):
+    key, _attr_name, _attr_icon = "unread", "Nieprzeczytane wiadomości", "mdi:email-alert"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    @property
+    def native_value(self):
+        return self.d.get("unread")

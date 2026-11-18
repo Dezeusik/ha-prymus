@@ -8,7 +8,8 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 from .api import PrymusAuthError, PrymusClient
-from .const import DOMAIN, EVENT_NEW_GRADE, EVENT_NEW_REMARK, PAGES
+from .const import (CALENDAR_DAYS_AHEAD, CALENDAR_DAYS_BACK, DOMAIN, EVENT_NEW_EVENT, EVENT_NEW_GRADE,
+                    EVENT_NEW_REMARK, PAGES)
 from .parser import parse_all
 
 _LOGGER = logging.getLogger(__name__)
@@ -30,6 +31,12 @@ class PrymusCoordinator(DataUpdateCoordinator):
             self._state = await self._store.async_load() or {}
         try:
             pages = {p: await self.client.page(p) for p in PAGES}
+            today = dt_util.now().date()
+            off = dt_util.now().strftime("%z")
+            pages["_kalendarz_feed"] = await self.client.calendar_feed(
+                today - timedelta(days=CALENDAR_DAYS_BACK), today + timedelta(days=CALENDAR_DAYS_AHEAD),
+                f"{off[:3]}:{off[3:]}")
+            pages["_liczba_wiadomosci"] = await self.client.unread()
         except PrymusAuthError as e:
             raise ConfigEntryAuthFailed(str(e)) from e
         except Exception as e:  # noqa: BLE001
@@ -49,12 +56,17 @@ class PrymusCoordinator(DataUpdateCoordinator):
                 ev = {"przedmiot": subj, "kategoria": cat, "ocena": val, "wykryto": now}
                 history.insert(0, ev)
                 self.hass.bus.async_fire(EVENT_NEW_GRADE, ev)
+            old_e = set(self._state.get("events", []))
+            for ev in data["events"]:
+                if ev["id"] and ev["id"] not in old_e and ev["start"] >= today.isoformat():
+                    self.hass.bus.async_fire(EVENT_NEW_EVENT, ev)
             old_r = set(self._state.get("remarks", []))
             for r in data["remarks"]:
                 if r["id"] and r["id"] not in old_r:
                     self.hass.bus.async_fire(EVENT_NEW_REMARK, r)
         self._state = {"grades": list(cur.elements()), "history": history[:30],
-                       "remarks": [r["id"] for r in data["remarks"] if r["id"]]}
+                       "remarks": [r["id"] for r in data["remarks"] if r["id"]],
+                       "events": sorted({*self._state.get("events", []), *(e["id"] for e in data["events"] if e["id"])})[-500:]}
         await self._store.async_save(self._state)
         data["history"] = self._state["history"]
         return data

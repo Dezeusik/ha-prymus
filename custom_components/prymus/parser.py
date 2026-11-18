@@ -1,7 +1,9 @@
 """Parsowanie stron panelu rodzica Prymus (h0X.prymus.net/rodzic/?dz=...).
 Bez zależności od Home Assistanta – testowalne samodzielnie."""
 from __future__ import annotations
+import json
 import re
+from datetime import date, datetime, time, timedelta
 from bs4 import BeautifulSoup, NavigableString, Tag
 
 WEEKDAYS = ["poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota", "niedziela"]
@@ -145,6 +147,58 @@ def parse_announcements(html: str) -> list[dict]:
     return out
 
 
+def _iso(v: str | None) -> str | None:
+    """'2026-11-16T08:00:00+0100' -> '2026-11-16T08:00:00+01:00' (poprawne ISO dla fromisoformat)."""
+    if not v:
+        return None
+    v = str(v).strip().replace(" ", "T", 1)
+    return re.sub(r"([+-]\d{2})(\d{2})$", r"\1:\2", v)
+
+
+def parse_events(text: str) -> list[dict]:
+    """Kanał kalendarza (POST ?dz=kalendarz, api=1&feed=1) -> lista wydarzeń."""
+    try:
+        data = json.loads(text)
+    except (TypeError, ValueError):
+        return []
+    out = []
+    for e in data if isinstance(data, list) else []:
+        if not isinstance(e, dict) or not e.get("start"):
+            continue
+        out.append({"id": str(e.get("id", "")), "tytul": str(e.get("title", "")).strip(),
+                    "opis": str(e.get("description") or "").strip(), "start": _iso(e.get("start")),
+                    "koniec": _iso(e.get("end")) or _iso(e.get("start")),
+                    "klasa": str(e.get("nazwa") or e.get("klasa") or "").strip(" -"),
+                    "kolor": e.get("backgroundColor")})
+    out.sort(key=lambda e: e["start"])
+    return out
+
+
+def parse_unread(text: str) -> int | None:
+    try:
+        v = json.loads(text).get("liczbaWiad")
+    except (TypeError, ValueError, AttributeError):
+        return None
+    try:
+        return int(v) if str(v).strip() else 0
+    except ValueError:
+        return None
+
+
+def lessons_on(timetable: dict, day: date) -> list[dict]:
+    """Lekcje w danym dniu z godzinami jako ISO (strefa lokalna doklejana w HA)."""
+    name = WEEKDAYS[day.weekday()]
+    out = []
+    for l in timetable.get(name, []):
+        m = re.findall(r"(\d{1,2}):(\d{2})", l["godziny"])
+        if len(m) < 2:
+            continue
+        (h1, m1), (h2, m2) = m[0], m[1]
+        out.append({**l, "start": datetime.combine(day, time(int(h1), int(m1))).isoformat(),
+                    "koniec": datetime.combine(day, time(int(h2), int(m2))).isoformat()})
+    return out
+
+
 def parse_all(pages: dict[str, str]) -> dict:
     g = parse_grades(pages.get("oceny", ""))
     return {
@@ -155,4 +209,6 @@ def parse_all(pages: dict[str, str]) -> dict:
         "points": parse_points(pages.get("zdobyte_punkty", "")),
         "timetable": parse_timetable(pages.get("rozkl_ucznia", "")),
         "announcements": parse_announcements(pages.get("ogloszenia", "")),
+        "events": parse_events(pages.get("_kalendarz_feed", "")),
+        "unread": parse_unread(pages.get("_liczba_wiadomosci", "")),
     }

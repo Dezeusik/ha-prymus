@@ -102,6 +102,13 @@ class _Jar:
                 out[name] = c["value"]
         return "; ".join(f"{k}={v}" for k, v in out.items())
 
+    def value(self, url: URL, name: str) -> str | None:
+        for part in self.header(url).split("; "):
+            k, _, v = part.partition("=")
+            if k == name:
+                return v
+        return None
+
     def names_for(self, url: URL) -> str:
         return ",".join(k.split("=")[0] for k in self.header(url).split("; ") if k) or "-"
 
@@ -213,6 +220,38 @@ class PrymusClient:
             raise PrymusError(f"Po logowaniu trafiłem na {_short(url)} (HTTP {status}, tytuł: "
                               f"{title.group(1).strip()[:60] if title else '-'}) | " + " | ".join(hops[-5:]))
         self.base = url.with_path("/rodzic/").with_query({})
+
+    async def calendar_feed(self, start, end, tz: str = "+01:00") -> str:
+        """Wydarzenia kalendarza szkolnego – to samo zapytanie, które wysyła strona (FullCalendar)."""
+        for attempt in (0, 1):
+            if self.base is None:
+                await self.login()
+            page = self.base.with_query({"dz": "kalendarz"})
+            await self._get(page)  # odświeża XSRF-TOKEN dla /rodzic/
+            body = (f"api=1&feed=1&filtr=-2&start={start.isoformat()}T00:00:00{tz}"
+                    f"&end={end.isoformat()}T00:00:00{tz}").replace("+", "%2B").replace(":", "%3A")
+            hdr = {"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", "Accept": "application/json, */*",
+                   "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors", "Referer": str(page),
+                   "X-XSRF-TOKEN": self._jar.value(page, "XSRF-TOKEN") or ""}
+            url, status, text, _hops = await self._req("POST", page, data=body, headers=hdr)
+            if status == 200 and text.lstrip().startswith("["):
+                return text
+            if "/rodzic/" in url.path and status == 200:
+                return "[]"
+            self.base = None
+        _LOGGER.warning("Prymus: nie udało się pobrać kalendarza (HTTP %s)", status)
+        return "[]"
+
+    async def unread(self) -> str:
+        if self.base is None:
+            await self.login()
+        url = self.base.with_path("/rodzic/AJAX.php").with_query({"dz": "liczba_wiadomosci"})
+        try:
+            _u, status, text, _h = await self._req("GET", url, headers={"Accept": "application/json, */*",
+                                                                       "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors"})
+        except PrymusError:
+            return ""
+        return text if status == 200 else ""
 
     async def page(self, dz: str, **params) -> str:
         for attempt in (0, 1):

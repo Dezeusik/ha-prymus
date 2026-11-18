@@ -19,15 +19,29 @@ następnie zainstaluj „Prymus e-Dziennik” i zrestartuj HA.
 Możesz najpierw sprawdzić logowanie poza HA: `pip install beautifulsoup4 && python3 tools/test_login.py twoj@email`.
 
 ## Encje
+**Czujniki**
 | Encja | Stan | Atrybuty |
 |---|---|---|
-| Liczba ocen | ile ocen bieżących | oceny pogrupowane wg przedmiotu, oceny okresowe, semestr |
+| Liczba ocen | ile ocen bieżących | oceny wg przedmiotu, oceny okresowe, semestr |
 | Ostatnia nowa ocena | „Przedmiot: ocena” | kategoria, kiedy wykryto, 10 ostatnich |
 | Godziny opuszczone / Nieusprawiedliwione / Spóźnienia | suma w semestrze | podział na miesiące |
 | Uwagi | liczba | pozytywne, negatywne, lista |
 | Punkty zachowania | suma | wpisy |
-| Lekcje dzisiaj / jutro | liczba lekcji | godzina pierwszej i końca ostatniej, lista lekcji z salami |
-| Ogłoszenia | liczba | najnowsze (tytuł, autor, data, początek treści) |
+| Lekcje dzisiaj / jutro | liczba lekcji | pierwsza, koniec ostatniej, lista z salami |
+| Teraz | przedmiot trwającej lekcji albo `przerwa` / `przed lekcjami` / `po lekcjach` / `wolne` | lekcja, następna |
+| Następna lekcja | przedmiot | od, do, dzień, sala, nauczyciel |
+| Wydarzenia jutro | liczba wpisów z kalendarza szkolnego na jutro | tytuł, opis (np. co przynieść), godzina |
+| Najbliższe wydarzenie | tytuł | opis, start, koniec, za ile dni |
+| Nieprzeczytane wiadomości | liczba | – |
+| Ogłoszenia | liczba | najnowsze, lista |
+
+„Teraz”, „Następna lekcja” i czujniki binarne przeliczają się co minutę bez odpytywania serwera.
+
+**Czujniki binarne:** Lekcje dzisiaj, W szkole teraz (od początku pierwszej do końca ostatniej lekcji).
+
+**Kalendarze:** *Wydarzenia szkolne* (wpisy nauczycieli: sprawdziany, co przynieść, wyjścia) oraz *Plan lekcji*
+(bieżący tydzień powtarzany na kolejne tygodnie, bez zastępstw i dni wolnych). Oba można pokazać razem
+z innymi kalendarzami na karcie kalendarza.
 
 Strona nie podaje dat ocen. Dlatego „nowa ocena” oznacza ocenę, która pojawiła się od poprzedniego
 odczytu. Przy pierwszym uruchomieniu nic się nie zgłasza: integracja tylko zapamiętuje stan.
@@ -35,6 +49,7 @@ odczytu. Przy pierwszym uruchomieniu nic się nie zgłasza: integracja tylko zap
 ## Zdarzenia do automatyzacji
 - `prymus_nowa_ocena` z danymi: `przedmiot`, `kategoria`, `ocena`, `wykryto`
 - `prymus_nowa_uwaga` z danymi: `id`, `data`, `temat`, `status` (pozytywna/negatywna/neutralna)
+- `prymus_nowe_wydarzenie` z danymi: `tytul`, `opis`, `start`, `koniec`, gdy w kalendarzu szkolnym pojawi się nowy wpis
 
 ```yaml
 alias: Prymus – nowa ocena
@@ -63,6 +78,8 @@ actions:
       title: "Jutro {{ states('sensor.prymus_e_dziennik_lekcje_jutro') }} lekcji, od {{ state_attr('sensor.prymus_e_dziennik_lekcje_jutro','pierwsza') }}"
       message: >-
         {{ state_attr('sensor.prymus_e_dziennik_lekcje_jutro','lekcje') | map(attribute='przedmiot') | unique | join(', ') }}
+        {% for e in state_attr('sensor.prymus_e_dziennik_wydarzenia_jutro','wydarzenia') or [] %}
+        • {{ e.tytul }}{% if e.opis %}: {{ e.opis }}{% endif %}{% endfor %}
 ```
 
 ## Uwagi

@@ -6,4 +6,7 @@ CONF_SCAN_MINUTES = "scan_minutes"
 DEFAULT_SCAN_MINUTES = 60
 EVENT_NEW_GRADE = "prymus_nowa_ocena"
 EVENT_NEW_REMARK = "prymus_nowa_uwaga"
+EVENT_NEW_EVENT = "prymus_nowe_wydarzenie"
+CALENDAR_DAYS_BACK = 14
+CALENDAR_DAYS_AHEAD = 90
 PAGES = ("oceny", "nieobecn", "inform_ucznia", "zdobyte_punkty", "rozkl_ucznia", "ogloszenia")
