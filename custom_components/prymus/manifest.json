@@ -1,7 +1,7 @@
 {
   "domain": "prymus",
   "name": "Prymus e-Dziennik (panel rodzica)",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "documentation": "https://github.com/Dezeusik/ha-prymus",
   "issue_tracker": "https://github.com/Dezeusik/ha-prymus/issues",
   "codeowners": [

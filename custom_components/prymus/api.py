@@ -2,13 +2,15 @@
 from __future__ import annotations
 import logging
 import re
+import time
+from email.utils import parsedate_to_datetime
 import aiohttp
 from bs4 import BeautifulSoup
 from yarl import URL
 from .const import LOGIN_URL
 
 _LOGGER = logging.getLogger(__name__)
-HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; ha-prymus/0.2.2; +https://github.com/Dezeusik/ha-prymus)",
+HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; ha-prymus/0.2.3; +https://github.com/Dezeusik/ha-prymus)",
            "Accept": "text/html,application/xhtml+xml", "Accept-Language": "pl-PL,pl;q=0.9"}
 
 
@@ -25,6 +27,62 @@ class PrymusError(Exception):
     pass
 
 
+class _Jar:
+    """Minimalny, tolerancyjny słoik ciasteczek. aiohttp (http.cookies.SimpleCookie) po cichu
+    odrzuca niektóre nagłówki Set-Cookie serwerów Prymusa, co kończy się pętlą przekierowań."""
+
+    def __init__(self) -> None:
+        self._c: dict[tuple[str, str, str], dict] = {}
+
+    def update(self, url: URL, raw_headers: list[str]) -> list[str]:
+        names = []
+        host = (url.host or "").lower()
+        for raw in raw_headers:
+            parts = [p.strip() for p in raw.split(";")]
+            if "=" not in parts[0]:
+                continue
+            name, value = parts[0].split("=", 1)
+            name, value = name.strip(), value.strip()
+            attrs: dict[str, str] = {}
+            for a in parts[1:]:
+                k, _, v = a.partition("=")
+                attrs[k.strip().lower()] = v.strip()
+            domain = attrs.get("domain", "").lstrip(".").lower()
+            host_only = not domain
+            domain = domain or host
+            path = attrs.get("path") or "/"
+            expired = False
+            if "max-age" in attrs:
+                try:
+                    expired = int(attrs["max-age"]) <= 0
+                except ValueError:
+                    pass
+            elif "expires" in attrs:
+                try:
+                    expired = parsedate_to_datetime(attrs["expires"]).timestamp() < time.time()
+                except (TypeError, ValueError):
+                    pass
+            key = (name, domain, path)
+            if expired:
+                self._c.pop(key, None)
+            else:
+                self._c[key] = {"value": value, "host_only": host_only}
+            names.append(name + ("(-)" if expired else "") + ("" if host_only else f"@{domain}") +
+                          "{" + ",".join(sorted(k for k in attrs if k not in ("expires", "max-age", "path", "domain"))) + "}")
+        return names
+
+    def header(self, url: URL) -> str:
+        host, upath, out = (url.host or "").lower(), url.path or "/", {}
+        for (name, domain, path), c in sorted(self._c.items(), key=lambda kv: len(kv[0][2])):
+            ok = host == domain if c["host_only"] else (host == domain or host.endswith("." + domain))
+            if ok and upath.startswith(path):
+                out[name] = c["value"]
+        return "; ".join(f"{k}={v}" for k, v in out.items())
+
+    def names_for(self, url: URL) -> str:
+        return ",".join(k.split("=")[0] for k in self.header(url).split("; ") if k) or "-"
+
+
 _JS_REDIR = re.compile(r"""(?:window\.|document\.)?location(?:\.href)?\s*=\s*["']([^"']+)["']""")
 _META_REDIR = re.compile(r"""<meta[^>]+http-equiv=["']?refresh["']?[^>]*url=([^"'>]+)""", re.I)
 
@@ -32,6 +90,7 @@ _META_REDIR = re.compile(r"""<meta[^>]+http-equiv=["']?refresh["']?[^>]*url=([^"
 class PrymusClient:
     def __init__(self, session: aiohttp.ClientSession, email: str, password: str) -> None:
         self._s, self._email, self._password = session, email, password
+        self._jar = _Jar()
         self.base: URL | None = None  # np. https://h0X.prymus.net/rodzic/
 
     async def _req(self, method: str, url, data=None, headers=None) -> tuple[URL, int, str, list[str]]:
@@ -41,20 +100,25 @@ class PrymusClient:
         hops: list[str] = []
         seen: dict[str, int] = {}
         for _ in range(25):
-            async with self._s.request(method, url, data=data, headers={**HEADERS, **(headers or {})},
+            hdr = {**HEADERS, **(headers or {})}
+            ck = self._jar.header(url)
+            if ck:
+                hdr["Cookie"] = ck
+            async with self._s.request(method, url, data=data, headers=hdr,
                                        allow_redirects=False, timeout=aiohttp.ClientTimeout(total=45)) as r:
                 status = r.status
-                set_ck = ",".join(sorted({c for c in r.cookies})) or "-"
+                set_ck = " ".join(self._jar.update(r.url, r.headers.getall("Set-Cookie", []))) or "-"
                 loc = r.headers.get("Location")
                 html = "" if loc and 300 <= status < 400 else await r.text(errors="replace")
-            hops.append(f"{method} {_short(url)} -> {status} [cookies: {set_ck}]")
+            qn = ",".join(sorted(url.query.keys()))
+            hops.append(f"{method} {_short(url)}{'?' + qn if qn else ''} -> {status} [set: {set_ck}]")
             if not (loc and 300 <= status < 400):
                 return url, status, html, hops
             nxt = url.join(URL(loc, encoded=True))
             key = str(nxt)
             seen[key] = seen.get(key, 0) + 1
             if seen[key] > 2:
-                sent = ",".join(sorted(c.key for c in self._s.cookie_jar.filter_cookies(nxt).values())) or "-"
+                sent = self._jar.names_for(nxt)
                 hops.append(f"PĘTLA na {_short(nxt)}; ciasteczka wysyłane tam: {sent}")
                 _LOGGER.warning("Prymus: pętla przekierowań:\n  %s", "\n  ".join(hops))
                 raise PrymusError("Pętla przekierowań: " + " | ".join(hops[-6:]))

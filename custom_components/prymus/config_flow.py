@@ -11,7 +11,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def _check(hass, email, password):
-    c = PrymusClient(async_create_clientsession(hass, cookie_jar=aiohttp.CookieJar()), email, password)
+    c = PrymusClient(async_create_clientsession(hass, cookie_jar=aiohttp.DummyCookieJar()), email, password)
     await c.login()
     await c.page("oceny")
 
