@@ -1,4 +1,5 @@
 from __future__ import annotations
+import aiohttp
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
@@ -10,7 +11,7 @@ PLATFORMS = ["sensor"]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    session = async_create_clientsession(hass)  # osobny cookie jar dla tej integracji
+    session = async_create_clientsession(hass, cookie_jar=aiohttp.CookieJar())  # osobny cookie jar dla tej integracji
     client = PrymusClient(session, entry.data[CONF_EMAIL], entry.data[CONF_PASSWORD])
     coord = PrymusCoordinator(hass, client, entry.entry_id,
                               int(entry.options.get(CONF_SCAN_MINUTES, entry.data.get(CONF_SCAN_MINUTES, DEFAULT_SCAN_MINUTES))))

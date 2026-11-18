@@ -1,13 +1,17 @@
 from __future__ import annotations
+import logging
+import aiohttp
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from .api import PrymusAuthError, PrymusClient
 from .const import CONF_EMAIL, CONF_PASSWORD, CONF_SCAN_MINUTES, DEFAULT_SCAN_MINUTES, DOMAIN
 
+_LOGGER = logging.getLogger(__name__)
+
 
 async def _check(hass, email, password):
-    c = PrymusClient(async_create_clientsession(hass), email, password)
+    c = PrymusClient(async_create_clientsession(hass, cookie_jar=aiohttp.CookieJar()), email, password)
     await c.login()
     await c.page("oceny")
 
@@ -22,8 +26,10 @@ class PrymusFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await _check(self.hass, user_input[CONF_EMAIL], user_input[CONF_PASSWORD])
             except PrymusAuthError:
                 errors["base"] = "auth"
-            except Exception:  # noqa: BLE001
+            except Exception as e:  # noqa: BLE001
+                _LOGGER.exception("Prymus: test logowania nie powiódł się")
                 errors["base"] = "connect"
+                self._details = f"{type(e).__name__}: {e}"[:300]
             else:
                 await self.async_set_unique_id(user_input[CONF_EMAIL].lower())
                 self._abort_if_unique_id_configured()
@@ -33,7 +39,8 @@ class PrymusFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Required(CONF_PASSWORD): str,
             vol.Optional(CONF_SCAN_MINUTES, default=DEFAULT_SCAN_MINUTES): vol.All(vol.Coerce(int), vol.Range(min=15, max=1440)),
         })
-        return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
+        return self.async_show_form(step_id="user", data_schema=schema, errors=errors,
+                                    description_placeholders={"details": getattr(self, "_details", "")})
 
     async def async_step_reauth(self, entry_data):
         return await self.async_step_reauth_confirm()
@@ -46,10 +53,13 @@ class PrymusFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await _check(self.hass, entry.data[CONF_EMAIL], user_input[CONF_PASSWORD])
             except PrymusAuthError:
                 errors["base"] = "auth"
-            except Exception:  # noqa: BLE001
+            except Exception as e:  # noqa: BLE001
+                _LOGGER.exception("Prymus: ponowne logowanie nie powiodło się")
                 errors["base"] = "connect"
+                self._details = f"{type(e).__name__}: {e}"[:300]
             else:
                 self.hass.config_entries.async_update_entry(entry, data={**entry.data, CONF_PASSWORD: user_input[CONF_PASSWORD]})
                 await self.hass.config_entries.async_reload(entry.entry_id)
                 return self.async_abort(reason="reauth_successful")
-        return self.async_show_form(step_id="reauth_confirm", data_schema=vol.Schema({vol.Required(CONF_PASSWORD): str}), errors=errors)
+        return self.async_show_form(step_id="reauth_confirm", data_schema=vol.Schema({vol.Required(CONF_PASSWORD): str}),
+                                    errors=errors, description_placeholders={"details": getattr(self, "_details", "")})

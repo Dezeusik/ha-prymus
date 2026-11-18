@@ -3,12 +3,28 @@
     "step": {
       "user": {
         "title": "Prymus e-Dziennik",
-        "description": "Dane logowania z https://login.prymus.net (konto rodzica).",
-        "data": {"email": "E-mail", "password": "Hasło", "scan_minutes": "Odświeżanie co (min)"}
+        "description": "Dane logowania z https://login.prymus.net (konto rodzica).\n\n{details}",
+        "data": {
+          "email": "E-mail",
+          "password": "Hasło",
+          "scan_minutes": "Odświeżanie co (min)"
+        }
       },
-      "reauth_confirm": {"title": "Prymus – podaj hasło ponownie", "data": {"password": "Hasło"}}
+      "reauth_confirm": {
+        "title": "Prymus – podaj hasło ponownie",
+        "data": {
+          "password": "Hasło"
+        },
+        "description": "{details}"
+      }
     },
-    "error": {"auth": "Nieprawidłowy e-mail lub hasło (albo konto nieaktywowane)", "connect": "Nie udało się połączyć z dziennikiem"},
-    "abort": {"already_configured": "To konto jest już dodane", "reauth_successful": "Hasło zaktualizowane"}
+    "error": {
+      "auth": "Nieprawidłowy e-mail lub hasło (albo konto nieaktywowane)",
+      "connect": "Nie udało się połączyć z dziennikiem – szczegóły nad formularzem."
+    },
+    "abort": {
+      "already_configured": "To konto jest już dodane",
+      "reauth_successful": "Hasło zaktualizowane"
+    }
   }
 }
