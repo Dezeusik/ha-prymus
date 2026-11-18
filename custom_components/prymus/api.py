@@ -1,5 +1,6 @@
 """Logowanie (login.prymus.net, Laravel) i pobieranie stron panelu rodzica."""
 from __future__ import annotations
+import asyncio
 import logging
 import re
 import time
@@ -20,7 +21,12 @@ HEADERS = {
     "Sec-Fetch-Dest": "document",
     "Sec-Fetch-Mode": "navigate",
     "Sec-Fetch-User": "?1",
+    "sec-ch-ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"macOS"',
 }
+MAX_HOPS = 40          # przeglądarka: 20 na jedną nawigację
+MAX_SAME_URL = 10      # ile razy wolno trafić na ten sam adres (serwer bywa "w trakcie")
 _SECRET_PARAMS = {"code", "state", "token", "enc", "password", "_token", "client_secret"}
 
 
@@ -117,7 +123,8 @@ class PrymusClient:
         hops: list[str] = []
         seen: dict[str, int] = {}
         referer = (headers or {}).get("Referer")
-        for _ in range(25):
+        t0 = time.monotonic()
+        for _ in range(MAX_HOPS):
             hdr = {**HEADERS, **(headers or {})}
             hdr["Sec-Fetch-Site"] = "none" if referer is None else (
                 "same-origin" if URL(referer).host == url.host else "same-site")
@@ -132,14 +139,16 @@ class PrymusClient:
                 set_ck = " ".join(self._jar.update(r.url, r.headers.getall("Set-Cookie", []))) or "-"
                 loc = r.headers.get("Location")
                 html = "" if loc and 300 <= status < 400 else await r.text(errors="replace")
-            hops.append(f"{method} {_show(url)} -> {status} [set: {set_ck}]"
+            hops.append(f"{time.monotonic() - t0:5.1f}s {method} {_show(url)} -> {status} [set: {set_ck}]"
                         + (f" -> {_show(url.join(URL(loc, encoded=True)))}" if loc and 300 <= status < 400 else ""))
             if not (loc and 300 <= status < 400):
                 return url, status, html, hops
             nxt = url.join(URL(loc, encoded=True))
             key = str(nxt)
             seen[key] = seen.get(key, 0) + 1
-            if seen[key] > 2:
+            if seen[key] > 1:
+                await asyncio.sleep(min(0.3 * seen[key], 2.0))  # daj serwerowi chwilę, jak przeglądarka
+            if seen[key] > MAX_SAME_URL:
                 sent = self._jar.names_for(nxt)
                 hops.append(f"PĘTLA na {_show(nxt)}; ciasteczka wysyłane tam: {sent}")
                 _LOGGER.warning("Prymus: pętla przekierowań:\n  %s", "\n  ".join(hops))
@@ -149,7 +158,7 @@ class PrymusClient:
                 headers = {k: v for k, v in (headers or {}).items() if k not in ("Content-Type", "Origin")}
             url = nxt
         _LOGGER.warning("Prymus: za dużo przekierowań:\n  %s", "\n  ".join(hops))
-        raise PrymusError("Za dużo przekierowań: " + " | ".join(hops[-6:]))
+        raise PrymusError("Za dużo przekierowań: " + " | ".join(hops[-5:]))
 
     async def _get(self, url) -> tuple[URL, str]:
         url, status, html, hops = await self._req("GET", url)
@@ -169,7 +178,22 @@ class PrymusClient:
         data = {"_token": tok["value"], "email": self._email, "password": self._password}
         hdr = {"Origin": "https://login.prymus.net", "Referer": LOGIN_URL,
                "Content-Type": "application/x-www-form-urlencoded"}
-        url, status, html, hops = await self._req("POST", URL(LOGIN_URL), data=data, headers=hdr)
+        try:
+            url, status, html, hops = await self._req("POST", URL(LOGIN_URL), data=data, headers=hdr)
+        except PrymusError as first:
+            if "/rodzic" not in str(first):
+                raise
+            # sesja SSO już jest – po chwili wejdź do panelu jeszcze raz, od zera
+            last = first
+            for delay in (3, 8):
+                await asyncio.sleep(delay)
+                try:
+                    url, status, html, hops = await self._req("GET", URL("https://login.prymus.net/home"))
+                    break
+                except PrymusError as e:
+                    last = e
+            else:
+                raise last
         _LOGGER.debug("Prymus logowanie:\n  %s", "\n  ".join(hops))
         if status == 419:
             raise PrymusError("HTTP 419 (CSRF) – serwer nie przyjął ciasteczka sesji")
