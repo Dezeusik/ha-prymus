@@ -10,8 +10,25 @@ from yarl import URL
 from .const import LOGIN_URL
 
 _LOGGER = logging.getLogger(__name__)
-HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; ha-prymus/0.2.3; +https://github.com/Dezeusik/ha-prymus)",
-           "Accept": "text/html,application/xhtml+xml", "Accept-Language": "pl-PL,pl;q=0.9"}
+# Nagłówki jak w zwykłym Chrome: serwer panelu rozróżnia przeglądarki po stronie serwera.
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/131.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-User": "?1",
+}
+_SECRET_PARAMS = {"code", "state", "token", "enc", "password", "_token", "client_secret"}
+
+
+def _show(url) -> str:
+    """Adres do logu: host, ścieżka i parametry, z ukrytymi wartościami poufnymi."""
+    u = URL(str(url))
+    q = "&".join(f"{k}={'…' if k.lower() in _SECRET_PARAMS else v[:40]}" for k, v in u.query.items())
+    return f"{u.host}{u.path}" + (f"?{q}" if q else "")
 
 
 def _short(url) -> str:
@@ -99,8 +116,13 @@ class PrymusClient:
         url = URL(str(url), encoded=isinstance(url, URL) and url.is_absolute())
         hops: list[str] = []
         seen: dict[str, int] = {}
+        referer = (headers or {}).get("Referer")
         for _ in range(25):
             hdr = {**HEADERS, **(headers or {})}
+            hdr["Sec-Fetch-Site"] = "none" if referer is None else (
+                "same-origin" if URL(referer).host == url.host else "same-site")
+            if referer and "Referer" not in hdr:
+                hdr["Referer"] = referer
             ck = self._jar.header(url)
             if ck:
                 hdr["Cookie"] = ck
@@ -110,8 +132,8 @@ class PrymusClient:
                 set_ck = " ".join(self._jar.update(r.url, r.headers.getall("Set-Cookie", []))) or "-"
                 loc = r.headers.get("Location")
                 html = "" if loc and 300 <= status < 400 else await r.text(errors="replace")
-            qn = ",".join(sorted(url.query.keys()))
-            hops.append(f"{method} {_short(url)}{'?' + qn if qn else ''} -> {status} [set: {set_ck}]")
+            hops.append(f"{method} {_show(url)} -> {status} [set: {set_ck}]"
+                        + (f" -> {_show(url.join(URL(loc, encoded=True)))}" if loc and 300 <= status < 400 else ""))
             if not (loc and 300 <= status < 400):
                 return url, status, html, hops
             nxt = url.join(URL(loc, encoded=True))
@@ -119,11 +141,12 @@ class PrymusClient:
             seen[key] = seen.get(key, 0) + 1
             if seen[key] > 2:
                 sent = self._jar.names_for(nxt)
-                hops.append(f"PĘTLA na {_short(nxt)}; ciasteczka wysyłane tam: {sent}")
+                hops.append(f"PĘTLA na {_show(nxt)}; ciasteczka wysyłane tam: {sent}")
                 _LOGGER.warning("Prymus: pętla przekierowań:\n  %s", "\n  ".join(hops))
-                raise PrymusError("Pętla przekierowań: " + " | ".join(hops[-6:]))
+                raise PrymusError("Pętla przekierowań: " + " | ".join(hops[-5:]))
             if status in (301, 302, 303):
                 method, data = "GET", None
+                headers = {k: v for k, v in (headers or {}).items() if k not in ("Content-Type", "Origin")}
             url = nxt
         _LOGGER.warning("Prymus: za dużo przekierowań:\n  %s", "\n  ".join(hops))
         raise PrymusError("Za dużo przekierowań: " + " | ".join(hops[-6:]))
