@@ -66,6 +66,9 @@ actions:
 ```
 
 ## Uwagi
+- Pierwsze logowanie może potrwać do minuty. Po powrocie z logowania (OAuth) panel `h0X.prymus.net`
+  przez chwilę odsyła na „wybór ucznia”, zanim wpuści do panelu, więc integracja cierpliwie czeka.
+  Przy problemach uruchom `tools/test_login.py` (instrukcja w pliku). Wypisze cały przebieg logowania.
 - Hasło jest zapisane w konfiguracji HA (`.storage/core.config_entries`), tak jak w innych integracjach chmurowych.
 - Gdy zmienisz hasło w dzienniku, HA poprosi o nowe.
 - To nieoficjalne rozwiązanie oparte na HTML-u strony, więc zmiana wyglądu dziennika może je zepsuć.
