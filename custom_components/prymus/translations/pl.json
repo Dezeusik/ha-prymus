@@ -26,5 +26,16 @@
       "already_configured": "To konto jest już dodane",
       "reauth_successful": "Hasło zaktualizowane"
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Prymus – ustawienia",
+        "description": "Jak często sprawdzać dziennik (minimum 15 minut).",
+        "data": {
+          "scan_minutes": "Odświeżanie co (min)"
+        }
+      }
+    }
   }
 }

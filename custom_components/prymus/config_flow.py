@@ -3,6 +3,7 @@ import logging
 import aiohttp
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from .api import PrymusAuthError, PrymusClient
 from .const import CONF_EMAIL, CONF_PASSWORD, CONF_SCAN_MINUTES, DEFAULT_SCAN_MINUTES, DOMAIN
@@ -18,6 +19,11 @@ async def _check(hass, email, password):
 
 class PrymusFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        return PrymusOptionsFlow()
 
     async def async_step_user(self, user_input=None):
         errors = {}
@@ -63,3 +69,16 @@ class PrymusFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return self.async_abort(reason="reauth_successful")
         return self.async_show_form(step_id="reauth_confirm", data_schema=vol.Schema({vol.Required(CONF_PASSWORD): str}),
                                     errors=errors, description_placeholders={"details": getattr(self, "_details", "")})
+
+
+class PrymusOptionsFlow(config_entries.OptionsFlow):
+    """Ustawienia → Integracje → Prymus → Konfiguruj: odstęp odświeżania."""
+
+    async def async_step_init(self, user_input=None):
+        if user_input is not None:
+            return self.async_create_entry(data=user_input)
+        cur = self.config_entry.options.get(
+            CONF_SCAN_MINUTES, self.config_entry.data.get(CONF_SCAN_MINUTES, DEFAULT_SCAN_MINUTES))
+        schema = vol.Schema({vol.Required(CONF_SCAN_MINUTES, default=int(cur)):
+                             vol.All(vol.Coerce(int), vol.Range(min=15, max=1440))})
+        return self.async_show_form(step_id="init", data_schema=schema)

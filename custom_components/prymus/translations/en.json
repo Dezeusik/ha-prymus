@@ -26,5 +26,16 @@
       "already_configured": "To konto jest już dodane",
       "reauth_successful": "Hasło zaktualizowane"
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Prymus – settings",
+        "description": "How often to check the e-diary (minimum 15 minutes).",
+        "data": {
+          "scan_minutes": "Refresh every (min)"
+        }
+      }
+    }
   }
 }
