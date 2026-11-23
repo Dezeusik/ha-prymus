@@ -147,6 +147,35 @@ def parse_announcements(html: str) -> list[dict]:
     return out
 
 
+def parse_messages(html: str) -> list[dict]:
+    """Odebrane wiadomości z modułu komunikacyjnego. Treść jest w ukrytej komórce .mailbox-content,
+    więc wystarczy GET strony (nie wysyłamy fn=odczyt, żeby nie oznaczać wiadomości jako przeczytane)."""
+    out = []
+    for tr in _soup(html).select("tr.messageObject"):
+        mid = tr.get("data-id")
+        if not mid:
+            continue
+
+        def cell(name):
+            return tr.find(id=f"mailbox-{name}-{mid}")
+
+        subj = cell("subject")
+        content = cell("content")
+        att = cell("attachment-details")
+        files = [_txt(a) for a in att.find_all("a")] if att else []
+        text = content.get_text("\n").strip() if content else ""
+        text = re.sub(r"[ \t]+\n", "\n", re.sub(r"\n{3,}", "\n\n", text))
+        out.append({
+            "id": str(mid), "grupa": tr.get("data-idgrupy"),
+            "od": _txt(cell("name")), "temat": _txt(subj), "data": _txt(cell("date")),
+            "tresc": text[:4000],
+            "nieprzeczytana": bool(subj and ("font-weight-bold" in (subj.get("class") or []) or subj.find("b"))),
+            "zalaczniki": [f for f in files if f],
+        })
+    out.sort(key=lambda m: m["data"], reverse=True)
+    return out
+
+
 def _iso(v: str | None) -> str | None:
     """'2026-11-16T08:00:00+0100' -> '2026-11-16T08:00:00+01:00' (poprawne ISO dla fromisoformat)."""
     if not v:
@@ -211,4 +240,5 @@ def parse_all(pages: dict[str, str]) -> dict:
         "announcements": parse_announcements(pages.get("ogloszenia", "")),
         "events": parse_events(pages.get("_kalendarz_feed", "")),
         "unread": parse_unread(pages.get("_liczba_wiadomosci", "")),
+        "messages": parse_messages(pages.get("modul_komunikacyjny", "")),
     }

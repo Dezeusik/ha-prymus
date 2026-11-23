@@ -14,7 +14,7 @@ async def async_setup_entry(hass, entry, async_add):
     c = hass.data[DOMAIN][entry.entry_id]
     async_add([cls(c, entry) for cls in (GradesCount, LatestGrade, MissedHours, Unexcused, Late,
                                          Remarks, Points, TodayPlan, TomorrowPlan, Announcements,
-                                         Now, NextLesson, EventsTomorrow, NextEvent, Unread)])
+                                         Now, NextLesson, EventsTomorrow, NextEvent, Unread, Messages)])
 
 
 class Base(CoordinatorEntity, SensorEntity):
@@ -246,3 +246,19 @@ class Unread(Base):
     @property
     def native_value(self):
         return self.d.get("unread")
+
+
+class Messages(Base):
+    """Wiadomości z modułu komunikacyjnego – stan: temat najnowszej, atrybuty: pełna treść."""
+    key, _attr_name, _attr_icon = "messages", "Wiadomości", "mdi:email-outline"
+
+    @property
+    def native_value(self):
+        m = self.d.get("messages") or []
+        return m[0]["temat"][:255] if m else None
+
+    @property
+    def extra_state_attributes(self):
+        m = self.d.get("messages") or []
+        return {"nieprzeczytane": sum(x["nieprzeczytana"] for x in m), "najnowsza": m[0] if m else None,
+                "lista": [{**x, "tresc": x["tresc"][:300]} for x in m[:5]]}

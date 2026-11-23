@@ -9,7 +9,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 from .api import PrymusAuthError, PrymusClient
 from .const import (CALENDAR_DAYS_AHEAD, CALENDAR_DAYS_BACK, DOMAIN, EVENT_NEW_EVENT, EVENT_NEW_GRADE,
-                    EVENT_NEW_REMARK, PAGES)
+                    EVENT_NEW_MESSAGE, EVENT_NEW_REMARK, PAGES)
 from .parser import parse_all
 
 _LOGGER = logging.getLogger(__name__)
@@ -64,7 +64,14 @@ class PrymusCoordinator(DataUpdateCoordinator):
             for r in data["remarks"]:
                 if r["id"] and r["id"] not in old_r:
                     self.hass.bus.async_fire(EVENT_NEW_REMARK, r)
-        self._state = {"grades": list(cur.elements()), "history": history[:30],
+        # wiadomości: przy pierwszym uruchomieniu tej funkcji tylko zapamiętujemy istniejące
+        msgs_known = self._state.get("messages")
+        if msgs_known is not None:
+            for m in reversed(data["messages"]):
+                if m["id"] not in set(msgs_known):
+                    self.hass.bus.async_fire(EVENT_NEW_MESSAGE, m)
+        msg_ids = sorted({*(msgs_known or []), *(m["id"] for m in data["messages"])})[-500:]
+        self._state = {"grades": list(cur.elements()), "history": history[:30], "messages": msg_ids,
                        "remarks": [r["id"] for r in data["remarks"] if r["id"]],
                        "events": sorted({*self._state.get("events", []), *(e["id"] for e in data["events"] if e["id"])})[-500:]}
         await self._store.async_save(self._state)
