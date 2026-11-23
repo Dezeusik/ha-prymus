@@ -151,7 +151,9 @@ class Announcements(Base):
     @property
     def extra_state_attributes(self):
         a = self.d.get("announcements", [])
-        return {"najnowsze": a[0] if a else None, "lista": a[:5]}
+        # pełna treść tylko dla najnowszego (limit atrybutów w bazie HA to 16 KB), reszta skrócona
+        return {"najnowsze": a[0] if a else None,
+                "lista": [{**x, "tresc": (x.get("tresc") or "")[:500]} for x in a[:5]]}
 
 
 class _Clock(Base):

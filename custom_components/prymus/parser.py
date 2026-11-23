@@ -143,7 +143,7 @@ def parse_announcements(html: str) -> list[dict]:
         date = _txt(date_el)
         author = _txt(small).replace(date, "").strip() if small else None
         text = _txt(body.select_one(".card-text"))
-        out.append({"tytul": _txt(title), "autor": author, "data": date, "tresc": text[:300]})
+        out.append({"tytul": _txt(title), "autor": author, "data": date, "tresc": text[:4000]})
     return out
 
 
